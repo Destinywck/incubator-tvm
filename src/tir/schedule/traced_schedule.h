@@ -89,8 +89,11 @@ class TracedScheduleNode : public ConcreteScheduleNode {
                     int offset) final;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+              bool update = false) final;
   /******** Schedule: Misc ********/
   void EnterPostproc() final;
+  void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) final;
 };
 
 }  // namespace tir

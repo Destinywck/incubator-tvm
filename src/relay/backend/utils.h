@@ -511,6 +511,15 @@ Map<Target, IRModule> TargetStrModuleMapToTargetModuleMap(
  */
 void UpdateAutoSchedulerOpWeights(tec::TECompiler compiler);
 
+/*!
+ * \brief Return whether meta schedule is enabled in the pass context.
+ */
+inline bool IsMetaScheduleEnabled() {
+  return transform::PassContext::Current()
+      ->GetConfig<Bool>("relay.backend.use_meta_schedule", Bool(false))
+      .value();
+}
+
 }  // namespace backend
 }  // namespace relay
 }  // namespace tvm

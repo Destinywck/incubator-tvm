@@ -62,6 +62,8 @@ class TECompilerImpl : public TECompilerNode {
  public:
   // Lower the function.
   CachedFunc Lower(const CCacheKey& key, std::function<String(String)> mangle_fn) {
+    auto pass_ctx = transform::PassContext::Current();
+    with_tir_schedule_ = pass_ctx->GetConfig<Bool>("relay.with_tir_schedule", Bool(false)).value();
     return LowerInternal(key, mangle_fn)->cached_func;
   }
 
@@ -222,7 +224,8 @@ class TECompilerImpl : public TECompilerNode {
       auto global_var = GlobalVar(func_name);
       global_var->checked_type_ = key->source_func->checked_type();
       ir_module->Add(global_var, key->source_func);
-      value->cached_func = CachedFunc(target, global_var, {}, {}, te::Schedule(), {}, ir_module);
+      value->cached_func =
+          CachedFunc(target, global_var, {}, {}, te::Schedule(), tir::PrimFunc(), {}, ir_module);
       return value;
     }
 
@@ -250,9 +253,13 @@ class TECompilerImpl : public TECompilerNode {
       all_args.push_back(arg);
     }
 
-    std::unordered_map<te::Tensor, tir::Buffer> binds;
     auto func_name = cfunc->prim_fn_var->name_hint;
-    cfunc->funcs->Update(tvm::LowerSchedule(cfunc->schedule, all_args, func_name, binds));
+    if (with_tir_schedule_ && cfunc->prim_func.defined()) {
+      cfunc->funcs->Update(LowerPrimFunc(cfunc->prim_func, func_name));
+    } else {
+      std::unordered_map<te::Tensor, tir::Buffer> binds;
+      cfunc->funcs->Update(tvm::LowerSchedule(cfunc->schedule, all_args, func_name, binds));
+    }
     value->cached_func = cfunc;
     return value;
   }
@@ -306,6 +313,8 @@ class TECompilerImpl : public TECompilerNode {
   std::unordered_map<CCacheKey, CCacheValue> shape_func_cache_;
   /*! \brief the cache key of the function that is being lowered currently*/
   CCacheKey cur_ccache_key_;
+  /*! \brief whether use tir schedule */
+  bool with_tir_schedule_;
 };
 
 TECompiler::TECompiler() {

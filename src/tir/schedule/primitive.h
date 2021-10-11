@@ -284,7 +284,11 @@ TVM_DLL void StorageAlign(ScheduleState self, const StmtSRef& block_sref, int bu
 
 /******** Schedule: Blockize & Tensorize ********/
 /******** Schedule: Annotation ********/
+TVM_DLL void Pragma(ScheduleState self, const StmtSRef& loop_sref, const String& pragma_type,
+                    const PrimExpr& pragma_value, bool update);
 /******** Schedule: Misc ********/
+TVM_DLL void SetScope(ScheduleState self, const StmtSRef& block_sref, int i,
+                      const String& storage_scope);
 
 }  // namespace tir
 }  // namespace tvm

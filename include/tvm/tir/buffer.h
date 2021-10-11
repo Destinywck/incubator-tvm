@@ -36,6 +36,7 @@ namespace tir {
 
 // forward declare Stmt
 class Stmt;
+class Buffer;
 
 /*! \brief buffer type */
 enum BufferType : int {
@@ -128,6 +129,13 @@ class BufferNode : public Object {
    * float16x4 elements in a buffer of type float16x4.)
    */
   PrimExpr ElemOffset(Array<PrimExpr> index) const;
+
+  /*!
+   * \brief Create a new buffer with the given scope info
+   * \param scope The scope info
+   * \return The buffer created
+   */
+  TVM_DLL Buffer WithScope(const String& scope) const;
 
   static constexpr const char* _type_key = "tir.Buffer";
   static constexpr const bool _type_has_method_sequal_reduce = true;

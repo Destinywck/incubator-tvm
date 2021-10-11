@@ -416,7 +416,24 @@ class ScheduleNode : public runtime::Object {
                             int offset) = 0;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  /*!
+   * \brief Add a pragma annotation to a specific loop
+   * \param loop_rv The loop to be annotated
+   * \param pragma_type The attribute key
+   * \param pragma_value The attribute value
+   * \param update Update the pragma if pragma_type is existed
+   */
+  virtual void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+                      bool update = false) = 0;
   /******** Schedule: Misc ********/
+  /*!
+   * \brief Set the storage scope of a buffer, where the buffer is given as the i-th write buffer
+   *        of the input block
+   * \param block_rv The producer of the buffer
+   * \param i The index of the buffer in block's write region
+   * \param storage_scope The storage scope to be set
+   */
+  virtual void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) = 0;
   /*! \brief A no-op that marks the start of postprocessing phase of scheduling */
   virtual void EnterPostproc() = 0;
 };

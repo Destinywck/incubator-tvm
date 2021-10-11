@@ -121,8 +121,11 @@ class ConcreteScheduleNode : public ScheduleNode {
                     int offset) override;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+              bool update = false) override;
   /******** Schedule: Misc ********/
   void EnterPostproc() override {}
+  void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) override;
 
  protected:
   /******** Utility functions ********/

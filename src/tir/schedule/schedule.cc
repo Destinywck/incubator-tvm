@@ -164,9 +164,13 @@ TVM_REGISTER_GLOBAL("tir.schedule.ScheduleStorageAlign")
     .set_body_method<Schedule>(&ScheduleNode::StorageAlign);
 /******** (FFI) Blockize & Tensorize ********/
 /******** (FFI) Annotation ********/
+TVM_REGISTER_GLOBAL("tir.schedule.SchedulePragma")
+    .set_body_method<Schedule>(&ScheduleNode::Pragma);
 /******** (FFI) Misc ********/
 TVM_REGISTER_GLOBAL("tir.schedule.ScheduleEnterPostproc")
     .set_body_method<Schedule>(&ScheduleNode::EnterPostproc);
+TVM_REGISTER_GLOBAL("tir.schedule.ScheduleSetScope")
+    .set_body_method<Schedule>(&ScheduleNode::SetScope);
 
 }  // namespace tir
 }  // namespace tvm

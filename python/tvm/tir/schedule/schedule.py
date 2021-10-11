@@ -1525,6 +1525,14 @@ class Schedule(Object):
 
     ########## Schedule: Annotation ##########
 
+    def set_scope(self, block: BlockRV, i: int, storage_scope: str) -> None:
+        _ffi_api.ScheduleSetScope(self, block, i, storage_scope)  # pylint: disable=no-member
+
+    def pragma(self, loop: LoopRV, pragma_type: str, pragma_value: ExprRV, update=False) -> None:
+        if isinstance(pragma_value, bool):
+            pragma_value = IntImm("bool", pragma_value)
+        _ffi_api.SchedulePragma(self, loop, pragma_type, pragma_value, update)  # pylint: disable=no-member
+
     ########## Schedule: Misc ##########
 
     def enter_postproc(self) -> None:
