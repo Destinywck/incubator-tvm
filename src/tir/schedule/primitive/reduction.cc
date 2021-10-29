@@ -36,19 +36,21 @@ class DecomposeReductionBlockReplacer : public StmtMutator {
    * \return The new block scope and the updated reduction block
    */
   static std::pair<Block, Block> Replace(Block old_scope_root, For target_loop,
-                                         Stmt decomposed_body, Block old_reduction_block) {
+                                         Stmt decomposed_body, Block old_reduction_block,
+                                         String name) {
     DecomposeReductionBlockReplacer replacer(std::move(target_loop), std::move(decomposed_body),
-                                             std::move(old_reduction_block));
+                                             std::move(old_reduction_block), std::move(name));
     return std::make_pair(Downcast<Block>(replacer(std::move(old_scope_root))),
                           replacer.new_reduction_block_);
   }
 
  private:
-  explicit DecomposeReductionBlockReplacer(For target_loop, Stmt decomposed_body,
-                                           Block old_reduction_block)
+  DecomposeReductionBlockReplacer(For target_loop, Stmt decomposed_body, Block old_reduction_block,
+                                  String name)
       : target_loop_(std::move(target_loop)),
         decomposed_body_(std::move(decomposed_body)),
-        old_reduction_block_(std::move(old_reduction_block)) {}
+        old_reduction_block_(std::move(old_reduction_block)),
+        name_(std::move(name)) {}
 
   Stmt VisitStmt_(const ForNode* loop) final {
     Stmt mutated_stmt = StmtMutator::VisitStmt_(loop);
@@ -62,7 +64,7 @@ class DecomposeReductionBlockReplacer : public StmtMutator {
   Stmt VisitStmt_(const BlockNode* block) final {
     if (block == old_reduction_block_.get()) {
       ObjectPtr<BlockNode> p_new_block = CopyOnWrite(block);
-      p_new_block->name_hint = p_new_block->name_hint + "_update";
+      p_new_block->name_hint = name_.empty() ? p_new_block->name_hint + "_update" : name_;
       p_new_block->init = NullOpt;
       new_reduction_block_ = Block(p_new_block);
       return new_reduction_block_;
@@ -84,6 +86,7 @@ class DecomposeReductionBlockReplacer : public StmtMutator {
   For target_loop_;
   Stmt decomposed_body_;
   Block old_reduction_block_;
+  String name_;
   Block new_reduction_block_;
 };
 
@@ -182,7 +185,7 @@ PrimExpr RemakePredicate(PrimExpr pred, const std::unordered_set<const VarNode*>
 }
 
 StmtSRef DecomposeReduction(ScheduleState self, const StmtSRef& block_sref,
-                            const StmtSRef& loop_sref) {
+                            const StmtSRef& loop_sref, const String& init, const String& update) {
   /*!
    *  Check
    *    - block is a reduction block
@@ -211,7 +214,7 @@ StmtSRef DecomposeReduction(ScheduleState self, const StmtSRef& block_sref,
   // IR Manipulation
   ObjectPtr<BlockNode> init_block = make_object<BlockNode>();
   ObjectPtr<BlockRealizeNode> init_realize = make_object<BlockRealizeNode>();
-  init_block->name_hint = block->name_hint + "_init";
+  init_block->name_hint = init.empty() ? block->name_hint + "_init" : init;
   init_realize->iter_values = {};
   init_realize->block = Block(init_block);
   // Step 1. Create new block vars and their bindings
@@ -289,7 +292,7 @@ StmtSRef DecomposeReduction(ScheduleState self, const StmtSRef& block_sref,
   Block new_scope_root{nullptr};
   Block new_reduction_block{nullptr};
   std::tie(new_scope_root, new_reduction_block) = DecomposeReductionBlockReplacer::Replace(
-      GetRef<Block>(old_scope_root), GetRef<For>(loop), body, GetRef<Block>(block));
+      GetRef<Block>(old_scope_root), GetRef<For>(loop), body, GetRef<Block>(block), update);
   self->Replace(scope_root_sref, new_scope_root,
                 {{GetRef<Block>(old_scope_root), new_scope_root},
                  {GetRef<Block>(block), new_reduction_block}});
@@ -684,12 +687,13 @@ class BaseBlockCreator {
  public:
   explicit BaseBlockCreator(BlockRealize old_block_realize, For rf_loop,
                             BufferStore old_reduction_update, CommReducer reducer, Buffer rf_buffer,
-                            bool is_rf_block)
+                            bool is_rf_block, String new_name = String())
       : old_block_realize_(std::move(old_block_realize)),
         rf_loop_(std::move(rf_loop)),
         old_reduction_update_(std::move(old_reduction_update)),
         reducer_(std::move(reducer)),
         rf_buffer_(std::move(rf_buffer)),
+        new_name_(std::move(new_name)),
         is_rf_block_(is_rf_block) {
     n_block_iters_ = static_cast<int>(old_block_realize_->iter_values.size());
   }
@@ -708,15 +712,32 @@ class BaseBlockCreator {
       new_block_name = new_block_name + "_rf";
       predicate = old_block_realize_->predicate;
     }
-    new_block_ = Block(
-        /*iter_vars=*/iter_vars_,
-        /*reads=*/read_regions_,
-        /*writes=*/write_regions_,
-        /*name_hint=*/new_block_name,
-        /*body=*/new_reduction_update_,
-        /*init=*/
-        BufferStore(new_reduction_update_->buffer, reducer_->identity_element[0],
-                    new_reduction_update_->indices));
+    if (!new_name_.empty()) new_block_name = new_name_;
+    if (is_rf_block_) {
+      new_block_ = Block(
+          /*iter_vars=*/iter_vars_,
+          /*reads=*/read_regions_,
+          /*writes=*/write_regions_,
+          /*name_hint=*/new_block_name,
+          /*body=*/new_reduction_update_,
+          /*init=*/
+          BufferStore(new_reduction_update_->buffer, reducer_->identity_element[0],
+                      new_reduction_update_->indices));
+    } else {
+      new_block_ = Block(
+          /*iter_vars=*/iter_vars_,
+          /*reads=*/read_regions_,
+          /*writes=*/write_regions_,
+          /*name_hint=*/new_block_name,
+          /*body=*/new_reduction_update_,
+          /*init=*/
+          BufferStore(new_reduction_update_->buffer, reducer_->identity_element[0],
+                      new_reduction_update_->indices),
+          /*alloc_buffers=*/old_block_realize_->block->alloc_buffers,
+          /*match_buffers=*/old_block_realize_->block->match_buffers,
+          /*annotations=*/old_block_realize_->block->annotations,
+          /*span=*/old_block_realize_->block->span);
+    }
     new_block_realize_ = BlockRealize(iter_values_, predicate, new_block_);
   }
 
@@ -748,6 +769,8 @@ class BaseBlockCreator {
   /*! \brief The intermediate rfactor buffer */
   Buffer rf_buffer_;
 
+  /*! \brief Name of new block */
+  String new_name_;
   /*! \brief Whether we are creating the rfactor block or the write-back block */
   bool is_rf_block_;
   /*! \brief The new block iters of the new created block */
@@ -795,10 +818,10 @@ class RFactorBlockCreator : public BaseBlockCreator {
                                BufferStore old_reduction_update, CommReducer reducer,
                                Buffer rf_buffer,
                                std::unordered_map<const VarNode*, For> loop_vars2loop,
-                               int factor_axis, PrimExpr combiner_rhs)
+                               int factor_axis, PrimExpr combiner_rhs, String new_name)
       : BaseBlockCreator(std::move(old_block_realize), std::move(rf_loop),
                          std::move(old_reduction_update), std::move(reducer), std::move(rf_buffer),
-                         true),
+                         true, new_name),
         loop_vars2loop_(std::move(loop_vars2loop)),
         factor_axis_(factor_axis),
         combiner_rhs_(std::move(combiner_rhs)) {}
@@ -1131,7 +1154,8 @@ class BlockReplacer : public StmtMutator {
   std::unordered_map<const VarNode*, For> loop_vars2loop_;
 };
 
-StmtSRef RFactor(ScheduleState self, const StmtSRef& rf_loop_sref, int factor_axis) {
+StmtSRef RFactor(ScheduleState self, const StmtSRef& rf_loop_sref, int factor_axis,
+                 const String& name) {
   // *****************************************************
   // *    Condition Checks and Information Collection    *
   // *****************************************************
@@ -1198,7 +1222,7 @@ StmtSRef RFactor(ScheduleState self, const StmtSRef& rf_loop_sref, int factor_ax
   // Step 2. Create the rfactor block.
   RFactorBlockCreator rf_block_creator(block_realize, GetRef<For>(rf_loop), update, reducer,
                                        rf_buffer, loop_vars2loop, factor_axis,
-                                       std::move(combiner_rhs));
+                                       std::move(combiner_rhs), name);
   rf_block_creator.CreateBlock();
 
   // Step 3. Create the write-back block.

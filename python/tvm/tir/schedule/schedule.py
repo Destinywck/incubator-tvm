@@ -1224,7 +1224,7 @@ class Schedule(Object):
 
     ########## Schedule: Reduction ##########
 
-    def decompose_reduction(self, block: BlockRV, loop: LoopRV) -> BlockRV:
+    def decompose_reduction(self, block: BlockRV, loop: LoopRV, init="", update="") -> BlockRV:
         """Decompose a reduction block into two separate blocks.
 
         a) The init block, which is translated from the init statement of the reduction block;
@@ -1247,6 +1247,10 @@ class Schedule(Object):
             The reduction block to be decomposed
         loop : LoopRV
             The loop above which the init block is inserted before.
+        init : str
+            The name of init block
+        update : str
+            The name of update block
 
         Returns
         -------
@@ -1298,9 +1302,9 @@ class Schedule(Object):
                         C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vj, vk]
 
         """
-        return _ffi_api.ScheduleDecomposeReduction(self, block, loop)  # type: ignore # pylint: disable=no-member
+        return _ffi_api.ScheduleDecomposeReduction(self, block, loop, init, update)  # type: ignore # pylint: disable=no-member
 
-    def rfactor(self, loop: LoopRV, factor_axis: int) -> LoopRV:
+    def rfactor(self, loop: LoopRV, factor_axis: int, name="") -> LoopRV:
         """Factorize an associative reduction block by the specified loop.
 
         An associative reduction cannot be parallelized directly,
@@ -1366,6 +1370,8 @@ class Schedule(Object):
             The loop outside block for which we want to do rfactor
         factor_axis : int
             The position where the new dimension is placed in the new introduced rfactor buffer
+        name : str
+            New name of rfactor block
 
         Returns
         -------
@@ -1441,7 +1447,7 @@ class Schedule(Object):
         where `B` is the buffer that the reduction block writes to.
         Negative indexing is normalized according to numpy convention.
         """
-        return _ffi_api.ScheduleRFactor(self, loop, factor_axis)  # type: ignore # pylint: disable=no-member
+        return _ffi_api.ScheduleRFactor(self, loop, factor_axis, name)  # type: ignore # pylint: disable=no-member
 
     ######## Schedule: Block annotation ########
 

@@ -246,10 +246,13 @@ TVM_DLL void ReverseComputeInline(ScheduleState self, const StmtSRef& block_sref
  * 3) The input loop is not lower than all the loops related to reduce block var.
  * \param block_rv The reduction block to be decomposed
  * \param loop_rv The loop above which the init block is inserted before.
+ * \param init New name of init block.
+ * \param update New name of update block.
  * \return The init block
  */
 TVM_DLL StmtSRef DecomposeReduction(ScheduleState self, const StmtSRef& block_sref,
-                                    const StmtSRef& loop_sref);
+                                    const StmtSRef& loop_sref, const String& init = String(),
+                                    const String& update = String());
 /*!
  * \brief Factor a reduction block by the specified loop
  * \details See python/tvm/tir/schedule/schedule.py
@@ -259,9 +262,11 @@ TVM_DLL StmtSRef DecomposeReduction(ScheduleState self, const StmtSRef& block_sr
  *                    buffer. Suppose the original reduction block writes to buffer `B` with
  *                    ndim(B) dimensions, then `factor_axis` should be in range `[-ndim(B) - 1,
  *                    ndim(B)]`, and the negative index will be normalized to a non-negative one
+ * \param name New name of rfactor block.
  * \return The sref of the rfactor block
  */
-TVM_DLL StmtSRef RFactor(ScheduleState self, const StmtSRef& loop_sref, int factor_axis);
+TVM_DLL StmtSRef RFactor(ScheduleState self, const StmtSRef& loop_sref, int factor_axis,
+                         const String& name = String());
 /******** Schedule: Block annotation ********/
 /*! \brief The quad used by StorageAlign for (buffer_idx, axis, factor, offset) */
 using StorageAlignTuple = Array<Integer>;
