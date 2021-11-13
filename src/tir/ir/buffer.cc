@@ -405,6 +405,22 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
   return tir::Call(ptr_type, tir::builtin::tvm_access_ptr(), acc_args);
 }
 
+Buffer BufferNode::WithScope(const String& scope) const {
+  auto n = make_object<BufferNode>(*this);
+  auto new_ptr = make_object<VarNode>(*n->data.get());
+  const auto* ptr_type = this->data->type_annotation.as<PointerTypeNode>();
+  ICHECK(ptr_type) << "Buffer variable is not of pointer type";
+  new_ptr->type_annotation = PointerType(ptr_type->element_type, scope);
+  n->data = Var(new_ptr);
+  std::string old_name = this->name.operator std::string();
+  if (old_name.size() < scope.size() || old_name.substr(old_name.size() - scope.size()) != scope) {
+    n->name = old_name + "_" + scope;
+  } else {
+    n->name = old_name;
+  }
+  return Buffer(n);
+}
+
 Buffer::Buffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
                PrimExpr elem_offset, String name, int data_alignment, int offset_factor,
                BufferType buffer_type, Span span) {

@@ -65,6 +65,7 @@ class TECompilerImpl : public TECompilerNode {
  public:
   // Lower the function.
   CachedFunc Lower(const CCacheKey& key, std::function<String(String)> mangle_fn) {
+    auto pass_ctx = transform::PassContext::Current();
     return LowerInternal(key, mangle_fn)->cached_func;
   }
 

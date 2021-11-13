@@ -232,6 +232,40 @@ inline int64_t GetLoopIntExtent(const StmtSRef& loop_sref) {
   return GetLoopIntExtent(loop);
 }
 
+inline void AddAnn(const ScheduleState& sch, const StmtSRef& sref, const String& ann_key,
+                   const PrimExpr& ann_val, bool update = false) {
+  // Extract annotation
+  const Map<String, ObjectRef>* annotations = nullptr;
+  if (const auto* loop = sref->StmtAs<ForNode>()) {
+    annotations = &loop->annotations;
+  } else if (const auto* block = sref->StmtAs<BlockNode>()) {
+    annotations = &block->annotations;
+  } else {
+    LOG(FATAL) << "TypeError: Unknown type of sref: " << sref->stmt->GetTypeKey();
+  }
+  // Check if the annotation already exists
+  if (annotations->find(ann_key) != annotations->end()) {
+    if (!update) return;
+  }
+  // Add the new annotation
+  Map<String, ObjectRef> new_ann(*annotations);
+  if (new_ann.find(ann_key) != new_ann.end()) new_ann.erase(ann_key);
+  new_ann.Set(ann_key, ann_val);
+  // Create the new stmt
+  if (const auto* loop = sref->StmtAs<ForNode>()) {
+    ObjectPtr<ForNode> n = make_object<ForNode>(*loop);
+    n->annotations = std::move(new_ann);
+    sch->Replace(sref, For(n), {});
+  } else if (const auto* block = sref->StmtAs<BlockNode>()) {
+    ObjectPtr<BlockNode> n = make_object<BlockNode>(*block);
+    n->annotations = std::move(new_ann);
+    Block p(n);
+    sch->Replace(sref, p, {{GetRef<Block>(block), p}});
+  } else {
+    LOG(FATAL) << "TypeError: Unknown type of sref: " << sref->stmt->GetTypeKey();
+    throw;
+  }
+}
 }  // namespace tir
 }  // namespace tvm
 

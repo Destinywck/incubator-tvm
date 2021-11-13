@@ -296,8 +296,9 @@ void TracedScheduleNode::ReverseComputeInline(const BlockRV& block_rv) {
 
 /******** Schedule: Reduction ********/
 
-BlockRV TracedScheduleNode::DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv) {
-  BlockRV result = ConcreteScheduleNode::DecomposeReduction(block_rv, loop_rv);
+BlockRV TracedScheduleNode::DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv,
+                                               const String& init, const String& update) {
+  BlockRV result = ConcreteScheduleNode::DecomposeReduction(block_rv, loop_rv, init, update);
   static const InstructionKind& kind = InstructionKind::Get("DecomposeReduction");
   trace_->Append(/*inst=*/Instruction(/*kind=*/kind,
                                       /*inputs=*/{block_rv, loop_rv},
@@ -306,8 +307,8 @@ BlockRV TracedScheduleNode::DecomposeReduction(const BlockRV& block_rv, const Lo
   return result;
 }
 
-BlockRV TracedScheduleNode::RFactor(const LoopRV& loop_rv, int factor_axis) {
-  BlockRV result = ConcreteScheduleNode::RFactor(loop_rv, factor_axis);
+BlockRV TracedScheduleNode::RFactor(const LoopRV& loop_rv, int factor_axis, const String& name) {
+  BlockRV result = ConcreteScheduleNode::RFactor(loop_rv, factor_axis, name);
   static const InstructionKind& kind = InstructionKind::Get("RFactor");
   trace_->Append(/*inst=*/Instruction(/*kind=*/kind,
                                       /*inputs=*/{loop_rv},
@@ -333,6 +334,16 @@ void TracedScheduleNode::StorageAlign(const BlockRV& block_rv, int buffer_index,
 
 /******** Schedule: Annotation ********/
 
+void TracedScheduleNode::Pragma(const LoopRV& loop_rv, const String& pragma_type,
+                                const ExprRV& pragma_value, bool update) {
+  ConcreteScheduleNode::Pragma(loop_rv, pragma_type, pragma_value, update);
+  static const InstructionKind& kind = InstructionKind::Get("Pragma");
+  trace_->Append(/*inst=*/Instruction(/*kind=*/kind,
+                                      /*inputs=*/{loop_rv, pragma_value},
+                                      /*attrs=*/{pragma_type},
+                                      /*outputs=*/{}));
+}
+
 /******** Schedule: Misc ********/
 
 void TracedScheduleNode::EnterPostproc() {
@@ -344,5 +355,13 @@ void TracedScheduleNode::EnterPostproc() {
                                       /*outputs=*/{}));
 }
 
+void TracedScheduleNode::SetScope(const BlockRV& block_rv, int i, const String& storage_scope) {
+  ConcreteScheduleNode::SetScope(block_rv, i, storage_scope);
+  static const InstructionKind& kind = InstructionKind::Get("SetScope");
+  trace_->Append(/*inst=*/Instruction(/*kind=*/kind,
+                                      /*inputs=*/{block_rv},
+                                      /*attrs=*/{Integer(i), storage_scope},
+                                      /*outputs=*/{}));
+}
 }  // namespace tir
 }  // namespace tvm

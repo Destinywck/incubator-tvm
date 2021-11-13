@@ -79,15 +79,19 @@ class TracedScheduleNode : public ConcreteScheduleNode {
   void ComputeInline(const BlockRV& block_rv) final;
   void ReverseComputeInline(const BlockRV& block_rv) final;
   /******** Schedule: Reduction ********/
-  BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv) final;
-  BlockRV RFactor(const LoopRV& loop_rv, int factor_axis) final;
+  BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv,
+                             const String& init = String(), const String& update = String()) final;
+  BlockRV RFactor(const LoopRV& loop_rv, int factor_axis, const String& name = String()) final;
   /******** Schedule: Block annotation ********/
   void StorageAlign(const BlockRV& block_rv, int buffer_index, int axis, int factor,
                     int offset) final;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+              bool update = false) final;
   /******** Schedule: Misc ********/
   void EnterPostproc() final;
+  void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) final;
 };
 
 }  // namespace tir

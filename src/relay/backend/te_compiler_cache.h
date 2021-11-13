@@ -154,6 +154,7 @@ struct CachedFuncNode : public Object {
     v->Visit("schedule", &schedule);
     v->Visit("prim_func", &prim_func);
     v->Visit("funcs", &funcs);
+    v->Visit("prim_func", &prim_func);
     v->Visit("shape_func_param_states", &shape_func_param_states);
   }
 

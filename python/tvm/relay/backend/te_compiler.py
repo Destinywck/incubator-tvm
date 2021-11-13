@@ -114,7 +114,11 @@ def get_valid_implementations(op, attrs, inputs, out_type, target):
         strategy = fstrategy(attrs, inputs, out_type, target)
     analyzer = tvm.arith.Analyzer()
     ret = []
-    for spec in strategy.specializations:
+    if PassContext.current().config.get("relay.with_tir_schedule", False):
+        specializations = strategy.tir_specializations
+    else:
+        specializations = strategy.specializations
+    for spec in specializations:
         if spec.condition:
             # check if all the clauses in the specialized condition are true
             flag = True
@@ -172,6 +176,7 @@ def select_implementation(op, attrs, inputs, out_type, target, use_autotvm=True)
     """
     all_impls = get_valid_implementations(op, attrs, inputs, out_type, target)
     best_plevel_impl = max(all_impls, key=lambda x: x.plevel)
+    with_tir = PassContext.current().config.get("relay.with_tir_schedule", False)
 
     # Disable autotvm if auto_scheduler is enabled.
     # (i.e., always return the implementation with the highest priority for auto-scheduler).
@@ -179,7 +184,7 @@ def select_implementation(op, attrs, inputs, out_type, target, use_autotvm=True)
         use_autotvm = False
 
     # If not use autotvm, always return the implementation with the highest priority
-    if not use_autotvm:
+    if not use_autotvm or with_tir:
         logger.info(
             "Using %s for %s based on highest priority (%d)",
             best_plevel_impl.name,

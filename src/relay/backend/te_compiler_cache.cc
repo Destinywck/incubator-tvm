@@ -80,6 +80,7 @@ CachedFunc::CachedFunc(tvm::Target target, GlobalVar prim_fn_var, tvm::Array<te:
   n->schedule = schedule;
   n->shape_func_param_states = shape_func_param_states;
   n->funcs = funcs;
+  n->prim_func = prim_func;
   data_ = std::move(n);
 }
 
@@ -159,10 +160,12 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
     // between inputs and outputs, and those should not be scheduled.
     // Hence schedule only non PlaceholderOp outputs.
     tvm::Array<te::Tensor> tensor_outs;
+    Array<te::Tensor> all_args = fn_inputs;
     for (const auto& tensor : outputs) {
       if (!tensor->op.as<te::PlaceholderOpNode>()) {
         tensor_outs.push_back(tensor);
       }
+      all_args.push_back(tensor);
     }
 
     te::Schedule schedule{nullptr};
@@ -197,10 +200,29 @@ class ScheduleBuilder : public backend::MemoizedExprTranslator<Array<te::Tensor>
         }
       }
 
+      if (use_meta_schedule_) {
+        const auto* fmeta_schedule =
+            runtime::Registry::Get("meta_schedule.relay_integration.get_func_from_dispatcher");
+        ICHECK(fmeta_schedule != nullptr)
+            << "meta_schedule.relay_integration.get_func_from_dispatcher is not registered";
+        const auto* fcreate_func = runtime::Registry::Get("te.CreatePrimFunc");
+        ObjectRef func = (*fcreate_func)(all_args);
+        ObjectRef obj = (*fmeta_schedule)(func);
+        if (obj.defined()) {
+          func = Downcast<tir::PrimFunc>(obj);
+        }
+      }
+
       // Use TOPI schdule if user specificed, or the function has no auto_scheduler schedule.
       if (!schedule.defined() && !prim_func.defined()) {
         ICHECK(anchor_implementation_.defined());
-        schedule = anchor_implementation_.Schedule(anchor_attrs_, tensor_outs, target_);
+        auto pass_ctx = transform::PassContext::Current();
+        bool with_tir = pass_ctx->GetConfig<Bool>("relay.with_tir_schedule", Bool(false)).value();
+        if (with_tir) {
+          prim_func = anchor_implementation_.PrimFunc(anchor_attrs_, all_args, target_);
+        } else {
+          schedule = anchor_implementation_.Schedule(anchor_attrs_, tensor_outs, target_);
+        }
       }
       if (schedule.defined()) {
         for (const auto& scalar : scalars_) {

@@ -412,9 +412,13 @@ class ScheduleNode : public runtime::Object {
    * 3) The input loop is not lower than all the loops related to reduce block var.
    * \param block_rv The reduction block to be decomposed
    * \param loop_rv The loop above which the init block is inserted before.
+   * \param init New name of init block.
+   * \param update New name of update block.
    * \return The init block
    */
-  virtual BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv) = 0;
+  virtual BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv,
+                                     const String& init = String(),
+                                     const String& update = String()) = 0;
   /*!
    * \brief Factorize an associative reduction block by the specified loop.
    * \details An associative reduction cannot be parallelized directly,
@@ -430,9 +434,11 @@ class ScheduleNode : public runtime::Object {
    *                    buffer. Suppose the original reduction block writes to buffer `B` with
    *                    ndim(B) dimensions, then `factor_axis` should be in range `[-ndim(B) - 1,
    *                    ndim(B)]`, and the negative index will be normalized to a non-negative one
+   * \param name New name of rfactor block.
    * \return The rfactor block
    */
-  virtual BlockRV RFactor(const LoopRV& loop_rv, int factor_axis) = 0;
+  virtual BlockRV RFactor(const LoopRV& loop_rv, int factor_axis,
+                          const String& name = String()) = 0;
   /******** Schedule: Block annotation ********/
   /*!
    * \brief Set alignment requirement for specific dimension such that
@@ -450,7 +456,24 @@ class ScheduleNode : public runtime::Object {
                             int offset) = 0;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  /*!
+   * \brief Add a pragma annotation to a specific loop
+   * \param loop_rv The loop to be annotated
+   * \param pragma_type The attribute key
+   * \param pragma_value The attribute value
+   * \param update Update the pragma if pragma_type is existed
+   */
+  virtual void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+                      bool update = false) = 0;
   /******** Schedule: Misc ********/
+  /*!
+   * \brief Set the storage scope of a buffer, where the buffer is given as the i-th write buffer
+   *        of the input block
+   * \param block_rv The producer of the buffer
+   * \param i The index of the buffer in block's write region
+   * \param storage_scope The storage scope to be set
+   */
+  virtual void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) = 0;
   /*! \brief A no-op that marks the start of postprocessing phase of scheduling */
   virtual void EnterPostproc() = 0;
 };

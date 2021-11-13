@@ -113,15 +113,20 @@ class ConcreteScheduleNode : public ScheduleNode {
   void ComputeInline(const BlockRV& block) override;
   void ReverseComputeInline(const BlockRV& block) override;
   /******** Schedule: Reduction ********/
-  BlockRV RFactor(const LoopRV& loop_rv, int factor_axis) override;
-  BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv) override;
+  BlockRV RFactor(const LoopRV& loop_rv, int factor_axis, const String& name = String()) override;
+  BlockRV DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv,
+                             const String& init = String(),
+                             const String& update = String()) override;
   /******** Schedule: Block annotation ********/
   void StorageAlign(const BlockRV& block_rv, int buffer_index, int axis, int factor,
                     int offset) override;
   /******** Schedule: Blockize & Tensorize ********/
   /******** Schedule: Annotation ********/
+  void Pragma(const LoopRV& loop_rv, const String& pragma_type, const ExprRV& pragma_value,
+              bool update = false) override;
   /******** Schedule: Misc ********/
   void EnterPostproc() override {}
+  void SetScope(const BlockRV& block_rv, int i, const String& storage_scope) override;
 
  protected:
   /******** Utility functions ********/

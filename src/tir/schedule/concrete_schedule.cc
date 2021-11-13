@@ -543,19 +543,21 @@ void ConcreteScheduleNode::StorageAlign(const BlockRV& block_rv, int buffer_inde
 
 /******** Schedule: Reduction ********/
 
-BlockRV ConcreteScheduleNode::DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv) {
+BlockRV ConcreteScheduleNode::DecomposeReduction(const BlockRV& block_rv, const LoopRV& loop_rv,
+                                                 const String& init, const String& update) {
   StmtSRef result{nullptr};
   TVM_TIR_SCHEDULE_BEGIN();
-  result = tir::DecomposeReduction(state_, this->GetSRef(block_rv), this->GetSRef(loop_rv));
+  result = tir::DecomposeReduction(state_, this->GetSRef(block_rv), this->GetSRef(loop_rv), init,
+                                   update);
   TVM_TIR_SCHEDULE_END("decompose-reduction", this->error_render_level_);
   this->state_->DebugVerify();
   return CreateRV<BlockRV>(result);
 }
 
-BlockRV ConcreteScheduleNode::RFactor(const LoopRV& loop_rv, int factor_axis) {
+BlockRV ConcreteScheduleNode::RFactor(const LoopRV& loop_rv, int factor_axis, const String& name) {
   StmtSRef result{nullptr};
   TVM_TIR_SCHEDULE_BEGIN();
-  result = tir::RFactor(state_, this->GetSRef(loop_rv), factor_axis);
+  result = tir::RFactor(state_, this->GetSRef(loop_rv), factor_axis, name);
   TVM_TIR_SCHEDULE_END("rfactor", this->error_render_level_);
   this->state_->DebugVerify();
   return CreateRV<BlockRV>(result);
@@ -563,7 +565,23 @@ BlockRV ConcreteScheduleNode::RFactor(const LoopRV& loop_rv, int factor_axis) {
 
 /******** Schedule: Blockize & Tensorize ********/
 /******** Schedule: Annotation ********/
+
+void ConcreteScheduleNode::Pragma(const LoopRV& loop_rv, const String& pragma_type,
+                                  const ExprRV& pragma_value, bool update) {
+  TVM_TIR_SCHEDULE_BEGIN();
+  tir::Pragma(state_, this->GetSRef(loop_rv), pragma_type, this->Get(pragma_value), update);
+  this->state_->DebugVerify();
+  TVM_TIR_SCHEDULE_END("pragma", this->error_render_level_);
+}
+
 /******** Schedule: Misc ********/
+
+void ConcreteScheduleNode::SetScope(const BlockRV& block_rv, int i, const String& storage_scope) {
+  TVM_TIR_SCHEDULE_BEGIN();
+  tir::SetScope(state(), this->GetSRef(block_rv), i, storage_scope);
+  this->state_->DebugVerify();
+  TVM_TIR_SCHEDULE_END("set-scope", this->error_render_level_);
+}
 
 }  // namespace tir
 }  // namespace tvm
