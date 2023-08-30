@@ -817,3 +817,7 @@ def get_shape_of(expr: Expr) -> Expr:
 
 def _update_struct_info(expr: Expr, struct_info: Optional[StructInfo]) -> None:
     _ffi_api.UpdateStructInfo(expr, struct_info)  # type: ignore
+
+
+def _reset_struct_info(expr: Expr, struct_info: Optional[StructInfo]) -> None:
+    _ffi_api.ResetStructInfo(expr, struct_info)  # type: ignore

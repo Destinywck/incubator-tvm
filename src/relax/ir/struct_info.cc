@@ -222,5 +222,36 @@ TVM_REGISTER_GLOBAL("ir.ExprStructInfo").set_body_typed([](Expr expr) {
   return GetStructInfo(expr);
 });
 
+// Helper functions
+void ResetStructInfo(Expr expr, StructInfo struct_info) {
+  expr->struct_info_ = struct_info;
+  // also set checked type
+  expr->checked_type_ = GetStaticType(struct_info);
+}
+
+TVM_REGISTER_GLOBAL("relax.ResetStructInfo").set_body_typed([](Expr expr, StructInfo struct_info) {
+  ResetStructInfo(expr, struct_info);
+});
+
+bool IsStaticStructInfo(ObjectRef struct_info) {
+  if (!struct_info.defined()) return false;
+  bool valid = true;
+  if (const auto* info = struct_info.as<TensorStructInfoNode>()) {
+    return info->shape.defined();
+  } else if (const auto* info = struct_info.as<TupleStructInfoNode>()) {
+    for (const auto& elem : info->fields) valid &= IsStaticStructInfo(elem);
+    return valid;
+  } else if (const auto* info = struct_info.as<FuncStructInfoNode>()) {
+    valid &= info->params.defined();
+    if (valid) {
+      for (const auto& elem : info->params.value()) valid &= IsStaticStructInfo(elem);
+      valid &= IsStaticStructInfo(info->ret);
+    }
+    return valid;
+  }
+
+  std::cout << "Unknow type of struct_info: " << struct_info->GetTypeKey() << std::endl;
+  return true;
+}
 }  // namespace relax
 }  // namespace tvm

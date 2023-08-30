@@ -268,6 +268,12 @@ Map<Var, Range> LoopDomainOfSRefTreePath(const StmtSRef& low_inclusive,
                                          const runtime::StorageScope& extra_relax_scope =  //
                                          runtime::StorageScope{runtime::StorageRank::kGlobal, ""});
 
+Map<Var, Range> CustomLoopDomainOfSRefTreePath(const StmtSRef& low_inclusive,
+                                               const Optional<StmtSRef>& high_exclusive = NullOpt,
+                                               const runtime::StorageScope& extra_relax_scope =  //
+                                               runtime::StorageScope{runtime::StorageRank::kGlobal,
+                                                                     ""});
+
 /*!
  * \brief Returns the block var binding
  * \param realize The BlockRealize to be analyzed

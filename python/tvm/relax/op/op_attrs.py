@@ -162,3 +162,8 @@ class EinsumAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.FlipAttrs")
 class FlipAttrs(Attrs):
     """Attributes for flip operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.ConcatAttrs")
+class ConcatAttrs(Attrs):
+    """Attributes for tensor.concat"""

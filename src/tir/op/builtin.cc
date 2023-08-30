@@ -383,6 +383,13 @@ TIR_DEFINE_BUILTIN_FUNC(anylist_setitem_call_packed)
 
 TIR_DEFINE_BUILTIN_FUNC(anylist_setitem_call_cpacked)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(evas_vec_add)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
+TIR_DEFINE_BUILTIN_FUNC(evas_vec_multiply)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+
 }  // namespace builtin
 }  // namespace tir
 }  // namespace tvm

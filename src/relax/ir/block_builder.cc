@@ -914,6 +914,467 @@ BlockBuilder BlockBuilder::Create(Optional<IRModule> mod) {
   return BlockBuilder(n);
 }
 
+class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const Expr&)> {
+ public:
+  explicit CustomNormalizer(IRModule context_mod) : BlockBuilderImpl(context_mod) {}
+
+  Expr Normalize(const Expr& expr) final {
+    Expr normalized = this->VisitExpr(expr);
+    // Invariant:
+    // After Normalize: an Expr always have
+    // struct_info (with the exception of Op).
+    if (!normalized->IsInstance<OpNode>()) {
+      ICHECK(normalized->struct_info_.defined())
+          << "The struct_info_ of an Expr except OpNode after "
+             "normalization must not be nullptr. However, this Expr does not have struct_info_: "
+          << normalized;
+    }
+
+    return normalized;
+  }
+
+  /*!
+   * \brief Normalize Argument values to call and other IR sub-fields.
+   * \param arg The argument.
+   * \return The normalized value.
+   *
+   * \note This function create a new binding for non-leaf expressions except for tuple.
+   */
+  Expr NormalizeArgument(const Expr& arg) final {
+    if (!block_stack_.empty()) {
+      // cache lookup
+      BlockFrame* cur_frame = CurrentBlockFrame();
+      auto it = cur_frame->normalize_binding_map.find(arg);
+      if (it != cur_frame->normalize_binding_map.end()) {
+        return it->second;
+      }
+    }
+    // skip visit expr's cache, normalize arg
+    Expr post = ExprFunctor::VisitExpr(arg);
+
+    if (!IsLeafOrTuple(arg)) {
+      ICHECK(!block_stack_.empty()) << "Cannot normalize non-leaf without a scope";
+      Var var = this->Emit(post, "");
+      // NOTE: current frame addr can change due to underlying vector
+      // re-allocation, redo lookup
+      CurrentBlockFrame()->normalize_binding_map[arg] = var;
+      return var;
+    } else {
+      return post;
+    }
+  }
+
+  RELAX_EXPR_NORMALIZER_LEAF(ExternFuncNode);
+  RELAX_EXPR_NORMALIZER_LEAF(GlobalVarNode);
+  RELAX_EXPR_NORMALIZER_LEAF(OpNode);
+  RELAX_EXPR_NORMALIZER_LEAF(ConstantNode);
+  RELAX_EXPR_NORMALIZER_LEAF(ShapeExprNode);
+  RELAX_EXPR_NORMALIZER_LEAF(PrimValueNode);
+  RELAX_EXPR_NORMALIZER_LEAF(StringImmNode);
+  RELAX_EXPR_NORMALIZER_LEAF(DataTypeImmNode);
+
+  template <typename T>
+  Expr VisitVar_(const typename T::ContainerType* var) {
+    // Parameters and free-vars must be present with struct info
+    // Other vars must have already been normalized through binding
+    ICHECK(IsStaticStructInfo(var->struct_info_))
+        << "Var " << var->name_hint() << " does not have struct info.";
+    return GetRef<Var>(var);
+  }
+
+  Expr VisitExpr_(const VarNode* var) final { return VisitVar_<Var>(var); }
+
+  Expr VisitExpr_(const DataflowVarNode* var) final { return VisitVar_<DataflowVar>(var); }
+
+  Expr VisitExpr(const Expr& expr) final {
+    // lookup normalize map
+    if (!block_stack_.empty()) {
+      BlockFrame* cur_frame = CurrentBlockFrame();
+      auto it = cur_frame->normalize_binding_map.find(expr);
+      if (it != cur_frame->normalize_binding_map.end()) {
+        return it->second;
+      }
+    }
+    return ExprFunctor::VisitExpr(expr);
+  }
+
+  Expr VisitExpr_(const TupleNode* op) final {
+    bool unchanged = true;
+    Array<Expr> new_fields;
+
+    for (const Expr& field : op->fields) {
+      Expr new_field = this->NormalizeArgument(field);
+      new_fields.push_back(new_field);
+      unchanged &= new_field.same_as(field);
+    }
+
+    unchanged &= IsStaticStructInfo(op->struct_info_);
+
+    Tuple tuple = unchanged ? GetRef<Tuple>(op) : Tuple(new_fields, op->span);
+    // Update tuple fields.
+    if (!tuple->struct_info_.defined()) {
+      Array<StructInfo> tuple_sinfo;
+      for (Expr field : tuple->fields) {
+        tuple_sinfo.push_back(GetStructInfo(field));
+      }
+      ResetStructInfo(tuple, TupleStructInfo(tuple_sinfo, op->span));
+    }
+    return tuple;
+  }
+
+  Expr VisitExpr_(const FunctionNode* op) final {
+    Expr new_body = this->VisitWithNewScope(op->body, op->params);
+
+    ICHECK(IsStaticStructInfo(new_body->struct_info_))
+        << "new_body: " << new_body << " does not have struct info.";
+
+    if (new_body.same_as(op->body) && IsStaticStructInfo(op->ret_struct_info)) {
+      return GetRef<Function>(op);
+    } else {
+      return Function(op->params, new_body, GetStructInfo(new_body), op->is_pure, op->attrs);
+    }
+  }
+
+  Expr VisitExpr_(const CallNode* op) final {
+    Expr new_op = this->NormalizeArgument(op->op);
+    bool unchanged = new_op.same_as(op->op);
+
+    Array<Expr> new_args;
+
+    for (Expr arg : op->args) {
+      Expr new_arg = this->NormalizeArgument(arg);
+      new_args.push_back(new_arg);
+      unchanged &= new_arg.same_as(arg);
+    }
+
+    unchanged &= IsStaticStructInfo(op->struct_info_);
+
+    Call call;
+    if (unchanged) {
+      call = GetRef<Call>(op);
+    } else {
+      call = Call(new_op, new_args, op->attrs, op->sinfo_args);
+    }
+
+    if (!call->struct_info_.defined()) {
+      auto inferred_sinfo = InferStructInfo(call);
+      ResetStructInfo(call, inferred_sinfo);
+    }
+
+    return call;
+  }
+
+  Expr VisitExpr_(const SeqExprNode* op) final {
+    bool unchanged = true;
+    Array<BindingBlock> new_blocks;
+    for (BindingBlock block : op->blocks) {
+      BindingBlock new_block = this->VisitBindingBlock(block);
+      new_blocks.push_back(new_block);
+      unchanged &= new_block.same_as(block);
+    }
+
+    this->BeginBindingBlock();
+    // the body may not be a leaf expression, so check for that
+    Expr new_body = this->NormalizeArgument(op->body);
+    unchanged &= new_body.same_as(op->body);
+    BindingBlock prologue = this->EndBlock();
+
+    if (!prologue->bindings.empty()) {
+      new_blocks.push_back(prologue);
+      unchanged = false;
+    }
+
+    // Combine nearby blocks if possible
+    Array<BindingBlock> normalized_blocks = NormalizeBlocks(new_blocks);
+    unchanged &= normalized_blocks.same_as(new_blocks);
+
+    SeqExpr seq_expr;
+    if (unchanged) {
+      seq_expr = GetRef<SeqExpr>(op);
+    } else {
+      seq_expr = SeqExpr(normalized_blocks, new_body, op->span);
+    }
+
+    // only do shape/type inference if the SeqExpr does not have shape/type
+    if (!seq_expr->struct_info_.defined()) {
+      ResetStructInfo(seq_expr, EraseToWellDefinedInScope(GetStructInfo(seq_expr->body)));
+    }
+    return seq_expr;
+  }
+
+  Expr VisitExpr_(const IfNode* op) final {
+    Expr new_cond = this->NormalizeArgument(op->cond);
+    Expr new_true = this->VisitWithNewScope(op->true_branch);
+    Expr new_false = this->VisitWithNewScope(op->false_branch);
+
+    If if_node;
+    if (new_cond.same_as(op->cond) && new_true.same_as(op->true_branch) &&
+        new_false.same_as(op->false_branch)) {
+      if_node = GetRef<If>(op);
+    } else {
+      if_node = If(new_cond, new_true, new_false, op->span);
+    }
+    if (!if_node->struct_info_.defined()) {
+      auto true_info = EraseToWellDefinedInScope(GetStructInfo(new_true));
+      auto false_info = EraseToWellDefinedInScope(GetStructInfo(new_false));
+      ResetStructInfo(if_node, StructInfoLCA(true_info, false_info));
+    }
+    return if_node;
+  }
+
+  Expr VisitExpr_(const TupleGetItemNode* op) final {
+    Expr new_tuple = this->NormalizeArgument(op->tuple);
+
+    TupleGetItem node = new_tuple.same_as(op->tuple) ? GetRef<TupleGetItem>(op)
+                                                     : TupleGetItem(new_tuple, op->index);
+
+    if (!node->struct_info_.defined()) {
+      auto opt = MatchStructInfo<TupleStructInfo>(node->tuple);
+      ICHECK(opt) << "The struct info of Tuple must be TupleStructInfo.";
+      ResetStructInfo(node, opt.value()->fields[node->index]);
+    }
+
+    return node;
+  }
+
+  Binding VisitBinding(const Binding& binding) {
+    if (auto* var_binding = binding.as<VarBindingNode>()) {
+      return this->VisitVarBinding(GetRef<VarBinding>(var_binding));
+    } else {
+      auto* match_cast = binding.as<MatchCastNode>();
+      ICHECK(match_cast) << "Unsupported binding type: " << binding->GetTypeKey();
+      return this->VisitMatchCast(GetRef<MatchCast>(match_cast));
+    }
+  }
+
+  VarBinding VisitVarBinding(VarBinding binding) {
+    Expr new_value = this->VisitExpr(binding->value);
+    if (!new_value.same_as(binding->value)) {
+      binding = VarBinding(binding->var, new_value, binding->span);
+    }
+    if (!binding->var->struct_info_.defined()) {
+      ResetStructInfo(binding->var, GetStructInfo(new_value));
+    }
+    return binding;
+  }
+
+  MatchCast VisitMatchCast(MatchCast binding) {
+    Expr new_value = this->VisitExpr(binding->value);
+    if (!new_value.same_as(binding->value)) {
+      binding = MatchCast(binding->var, new_value, binding->struct_info, binding->span);
+    }
+    if (!binding->var->struct_info_.defined()) {
+      ResetStructInfo(binding->var, binding->struct_info);
+    }
+    return binding;
+  }
+
+  BindingBlock VisitBindingBlock(const BindingBlock& block) {
+    if (block.as<DataflowBlockNode>()) {
+      this->BeginDataflowBlock();
+    } else {
+      this->BeginBindingBlock();
+    }
+
+    bool unchanged = true;
+    for (const Binding& binding : block->bindings) {
+      Binding new_binding = this->VisitBinding(binding);
+      unchanged &= new_binding.same_as(binding);
+
+      this->EmitNormalized(new_binding);
+    }
+    BindingBlock new_block = this->EndBlock();
+    unchanged &= new_block->bindings.size() == block->bindings.size();
+    if (unchanged) {
+      return block;
+    }
+    return new_block;
+  }
+
+ private:
+  // Helper function to infer the type of a Call.
+  StructInfo InferStructInfo(const Call& call) {
+    if (auto* op_ptr = call->op.as<OpNode>()) {
+      // Case 1: the op field is a primitive op, look up FInferStructInfo attribute
+      Op op = GetRef<Op>(op_ptr);
+      bool is_dist_op = false;
+      for (const auto& arg : call->args) {
+        if (arg->struct_info_.as<distributed::DTensorStructInfoNode>()) {
+          is_dist_op = true;
+          break;
+        }
+      }
+      if (is_dist_op) {
+        for (const auto& arg : call->args) {
+          ICHECK(!arg->struct_info_.as<TensorStructInfoNode>())
+              << "Distributed operator must take DTensor instead of Tensor as input";
+        }
+        ICHECK(op_map_dist_infer_struct_info_.count(op))
+            << " Cannot find the dist.FInferStructInfo attribute registered to op: " << op->name;
+        return op_map_dist_infer_struct_info_[op](call, GetRef<BlockBuilder>(this));
+      }
+      ICHECK(op_map_infer_struct_info_.count(op))
+          << " Cannot find the FInferStructInfo attribute registered to op: " << op->name;
+      return op_map_infer_struct_info_[op](call, GetRef<BlockBuilder>(this));
+    } else {
+      // derive using function parameters
+      ICHECK(call->op->struct_info_.defined());
+      auto opt = MatchStructInfo<FuncStructInfo>(call->op);
+      ICHECK(opt) << "Call->op must contains a function struct info";
+      FuncStructInfo finfo = opt.value();
+      return DeriveCallRetStructInfo(finfo, call, GetRef<BlockBuilder>(this), &analyzer_);
+    }
+  }
+
+  // erase to well defined within current scope.
+  StructInfo EraseToWellDefinedInScope(StructInfo info) {
+    if (scope_stack_.empty()) {
+      return EraseToWellDefined(info);
+    }
+    auto* curr_scope = CurrentScopeFrame();
+    auto f_shape_var_map = [curr_scope](tir::Var var) -> Optional<PrimExpr> {
+      auto it = curr_scope->shape_var_map.find(var);
+      if (it != curr_scope->shape_var_map.end()) return (*it).second;
+      return NullOpt;
+    };
+    return EraseToWellDefined(info, f_shape_var_map);
+  }
+
+  Expr VisitWithNewScope(const Expr& expr, Optional<Array<Var>> params = NullOpt) {
+    // SeqExpr do not need to prepare for normalization.
+    if (expr.as<SeqExprNode>()) {
+      this->BeginScope(params);
+      Expr ret = this->VisitExpr(expr);
+      this->EndScope();
+      return ret;
+    } else {
+      this->BeginScope(params);
+
+      this->BeginBindingBlock();
+      Expr post = this->NormalizeArgument(expr);
+      BindingBlock prologue = this->EndBlock();
+      // "New scopes" (function bodies, if/else clauses) must be wrapped in seq exprs.
+      // Don't wrap if it's already a seq and there are no bindings to add
+      if (post.as<SeqExprNode>() && prologue->bindings.empty()) {
+        return post;
+      }
+      Array<BindingBlock> bindings;
+      if (!prologue->bindings.empty()) {
+        bindings.push_back(prologue);
+      }
+
+      SeqExpr seq(bindings, post);
+      ResetStructInfo(seq, EraseToWellDefinedInScope(GetStructInfo(seq->body)));
+
+      this->EndScope();
+      return seq;
+    }
+  }
+
+  Array<BindingBlock> FlattenBlocks(const Array<BindingBlock>& blocks) {
+    // If there is a binding that is a seq expr, split the current block,
+    // add the nested blocks prior to the seq expr, and bind the seq expr body
+    // to the var
+    Array<BindingBlock> ret;
+    bool changed = false;
+    for (const BindingBlock& block : blocks) {
+      bool is_dataflow = block->IsInstance<DataflowBlockNode>();
+      Array<Binding> current;
+      for (const Binding& binding : block->bindings) {
+        Expr value;
+        if (const auto* var_binding = binding.as<VarBindingNode>()) {
+          value = var_binding->value;
+        } else if (const auto* match_cast = binding.as<MatchCastNode>()) {
+          value = match_cast->value;
+        } else {
+          LOG(FATAL) << "Unknown binding type: " << binding->GetTypeKey();
+        }
+        // if we encounter a nested seq, we have to flatten it:
+        //   1. Append the binding block we've accumulated so far
+        //   2. Reset the current block
+        //   3. Append the inner blocks
+        //   4. Add a binding of the current var to the seq expr's body to the current block
+        // then continue
+        if (auto seq = value.as<SeqExprNode>()) {
+          changed = true;
+          ret.push_back(is_dataflow ? DataflowBlock(current) : BindingBlock(current));
+          current = {};
+          // We do not need to flatten recursively because the normalizer will have normalized
+          // and thus flattened the inner SeqExprs already
+          for (const BindingBlock& block : seq->blocks) {
+            if (is_dataflow && !block->IsInstance<DataflowBlockNode>()) {
+              LOG(WARNING) << "Malformed AST: Seq expr nested inside a dataflow block contains a "
+                              "non-dataflow block! "
+                           << seq;
+            }
+            ret.push_back(block);
+          }
+
+          if (const auto* var_binding = binding.as<VarBindingNode>()) {
+            current.push_back(VarBinding(var_binding->var, seq->body));
+          } else if (const auto* match_cast = binding.as<MatchCastNode>()) {
+            current.push_back(MatchCast(match_cast->var, seq->body, match_cast->struct_info));
+          } else {
+            LOG(FATAL) << "Unknown binding type: " << binding->GetTypeKey();
+          }
+        } else {
+          current.push_back(binding);
+        }
+      }
+      ret.push_back(is_dataflow ? DataflowBlock(current) : BindingBlock(current));
+    }
+    return changed ? ret : blocks;
+  }
+
+  Array<BindingBlock> NormalizeBlocks(const Array<BindingBlock>& blocks) {
+    bool changed = false;
+    Array<BindingBlock> ret;
+    auto flattened = FlattenBlocks(blocks);
+    if (!flattened.same_as(blocks)) {
+      changed = true;
+    }
+    for (const BindingBlock& block : flattened) {
+      if (block->bindings.empty()) {
+        // Case 1. Skip empty blocks
+        changed = true;
+      } else if (!ret.empty() && ret.back()->type_index() == block->type_index()) {
+        // Case 2. Merge with previous block if possible
+        BindingBlock merged;
+        // NOTE: should check DataflowBlockNode first.
+        if (const auto* dataflow_block = ret.back().as<DataflowBlockNode>()) {
+          auto n = make_object<DataflowBlockNode>(*dataflow_block);
+          n->bindings.insert(n->bindings.end(), block->bindings.begin(), block->bindings.end());
+          merged = DataflowBlock(n);
+        } else if (const auto* binding_block = ret.back().as<BindingBlockNode>()) {
+          auto n = make_object<BindingBlockNode>(*binding_block);
+          n->bindings.insert(n->bindings.end(), block->bindings.begin(), block->bindings.end());
+          merged = BindingBlock(n);
+        } else {
+          LOG(FATAL) << "Unknown block type: " << ret.back()->GetTypeKey();
+        }
+        ret.pop_back();
+        ret.push_back(merged);
+        changed = true;
+      } else {
+        // Case 3. Add to the result
+        ret.push_back(block);
+      }
+    }
+    return changed ? ret : blocks;
+  }
+
+  /*! \brief Operator struct info inference map. */
+  tvm::OpAttrMap<FInferStructInfo> op_map_infer_struct_info_ =
+      Op::GetAttrMap<FInferStructInfo>("FInferStructInfo");
+  tvm::OpAttrMap<FInferStructInfo> op_map_dist_infer_struct_info_ =
+      Op::GetAttrMap<FInferStructInfo>("dist.FInferStructInfo");
+};
+
+BlockBuilder BlockBuilder::CreateCustom(Optional<IRModule> mod) {
+  ObjectPtr<BlockBuilderNode> n = make_object<CustomNormalizer>(mod.value_or(IRModule()));
+  return BlockBuilder(n);
+}
+
 //---------------------------------------
 // User facing function registration.
 //---------------------------------------

@@ -468,6 +468,10 @@ inline bool HasVoidStructInfo(const Expr& expr) {
  */
 TVM_DLL void UpdateStructInfo(Expr expr, StructInfo struct_info);
 
+TVM_DLL void ResetStructInfo(Expr expr, StructInfo struct_info);
+
+bool IsStaticStructInfo(ObjectRef struct_info);
+
 }  // namespace relax
 }  // namespace tvm
 #endif  // TVM_RELAX_STRUCT_INFO_H_

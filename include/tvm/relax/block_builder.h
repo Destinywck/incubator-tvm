@@ -231,6 +231,8 @@ class BlockBuilder : public ObjectRef {
    */
   TVM_DLL static BlockBuilder Create(Optional<IRModule> ctx_mod);
 
+  TVM_DLL static BlockBuilder CreateCustom(Optional<IRModule> ctx_mod);
+
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(BlockBuilder, ObjectRef, BlockBuilderNode);
 };
 

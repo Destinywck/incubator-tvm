@@ -465,3 +465,8 @@ def gen_call_tir_inputs(
         tir_vars = _shape_with_old_tir_var(unbound_tir_vars, tir_var_inverse_map)
 
     return (tir_func, call_tir_args, output_sinfo, tir_vars)
+
+
+def normalize_expr(expr: Expr) -> Expr:
+    """"""
+    return _ffi_api.NormalizeExpr(expr)  # type: ignore

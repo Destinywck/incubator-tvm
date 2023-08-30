@@ -675,6 +675,36 @@ Map<Var, Range> LoopDomainOfSRefTreePath(const StmtSRef& low_inclusive,
   return result;
 }
 
+Map<Var, Range> CustomLoopDomainOfSRefTreePath(const StmtSRef& low_inclusive,
+                                         const Optional<StmtSRef>& high_exclusive,
+                                         const runtime::StorageScope& extra_relax_scope) {
+  Map<Var, Range> result;
+  const StmtSRefNode* p = low_inclusive.get();
+  const StmtSRefNode* limit = static_cast<const StmtSRefNode*>(high_exclusive.get());
+  for (; p != limit; p = p->parent) {
+    const ForNode* loop = p->StmtAs<ForNode>();
+    if (loop == nullptr) {
+      // break;
+      continue;
+    }
+    result.Set(loop->loop_var, Range::FromMinExtent(loop->min, loop->extent));
+  }
+  if (extra_relax_scope.rank != runtime::StorageRank::kGlobal) {
+    for (; p; p = p->parent) {
+      if (const ForNode* loop = p->StmtAs<ForNode>()) {
+        if (loop->kind == ForKind::kThreadBinding) {
+          const String& thread_tag = loop->thread_binding.value()->thread_tag;
+          if (CanRelaxStorageUnderThread(extra_relax_scope,
+                                         runtime::ThreadScope::Create(thread_tag))) {
+            result.Set(loop->loop_var, Range::FromMinExtent(loop->min, loop->extent));
+          }
+        }
+      }
+    }
+  }
+  return result;
+}
+
 Map<Var, PrimExpr> GetBindings(const BlockRealize& realize) {
   const BlockNode* block = realize->block.get();
   const Array<IterVar>& all_lhs = block->iter_vars;
@@ -2143,6 +2173,11 @@ TVM_REGISTER_GLOBAL("tir.schedule.GetLoopIterType")
       } else {
         return "O";
       }
+    });
+
+TVM_REGISTER_GLOBAL("tir.schedule.LoopDomainOfSRefTreePath")
+    .set_body_typed([](StmtSRef low_inclusive, Optional<StmtSRef> high_exclusive) {
+      return CustomLoopDomainOfSRefTreePath(low_inclusive, high_exclusive);
     });
 
 }  // namespace tir

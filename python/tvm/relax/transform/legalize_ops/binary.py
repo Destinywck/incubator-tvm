@@ -41,7 +41,7 @@ def _binary(te_func: TEFunc) -> LegalizeFunc:
     return binary_call_te
 
 
-register_legalize("relax.add", _binary(topi.add))
+# register_legalize("relax.add", _binary(topi.add))
 register_legalize("relax.divide", _binary(topi.divide))
 register_legalize("relax.floor_divide", _binary(topi.floor_divide))
 register_legalize("relax.multiply", _binary(topi.multiply))

@@ -170,6 +170,146 @@ class NormalizeMutator : public ExprMutatorBase {
 
 Expr Normalize(const Expr& e) { return NormalizeMutator().VisitExpr(e); }
 
+class CustomNormalizeMutator : public ExprMutatorBase {
+ public:
+  CustomNormalizeMutator() { builder_ = BlockBuilder::CreateCustom(NullOpt); }
+
+  Expr VisitExpr(const Expr& expr) override {
+    return builder_->Normalize(ExprMutatorBase::VisitExpr(expr));
+  }
+
+  Expr VisitExpr_(const FunctionNode* op) final {
+    Expr body = this->VisitWithNewScope(op->body, op->params);
+
+    ICHECK(IsStaticStructInfo(body->struct_info_))
+        << "new_body: " << body << " does not have struct info.";
+
+    if (body.same_as(op->body) && IsStaticStructInfo(op->ret_struct_info)) {
+      return GetRef<Expr>(op);
+    } else {
+      return Function(op->params, body, op->ret_struct_info, op->is_pure, op->attrs);
+    }
+  }
+
+  Expr VisitExpr_(const IfNode* op) final {
+    Expr guard = this->VisitExpr(op->cond);
+    Expr true_b = this->VisitWithNewScope(op->true_branch);
+    Expr false_b = this->VisitWithNewScope(op->false_branch);
+    if (op->cond.same_as(guard) && op->true_branch.same_as(true_b) &&
+        op->false_branch.same_as(false_b)) {
+      return GetRef<Expr>(op);
+    } else {
+      return If(guard, true_b, false_b, op->span);
+    }
+  }
+
+  Expr VisitWithNewScope(const Expr& expr, Optional<Array<Var>> params = NullOpt) {
+    builder_->BeginBindingBlock();
+    builder_->BeginScope(params);
+    Expr ret = this->VisitExpr(expr);
+    BindingBlock prologue = builder_->EndBlock();
+    if (!prologue->bindings.empty()) {
+      ret = SeqExpr({prologue}, ret);
+    }
+    builder_->EndScope();
+    return ret;
+  }
+
+  Expr VisitExpr_(const SeqExprNode* op) final {
+    bool all_blocks_unchanged = true;
+    Array<BindingBlock> blocks;
+    for (auto block : op->blocks) {
+      BindingBlock new_block = this->VisitBindingBlock(block);
+      if (!new_block->bindings.empty()) {
+        blocks.push_back(new_block);
+      }
+      all_blocks_unchanged &= block.same_as(new_block);
+    }
+
+    builder_->BeginBindingBlock();
+    Expr body = this->VisitExpr(op->body);
+    BindingBlock prologue = builder_->EndBlock();
+    if (!prologue->bindings.empty()) {
+      blocks.push_back(prologue);
+      all_blocks_unchanged = false;
+    }
+
+    if (all_blocks_unchanged && body.same_as(op->body)) {
+      return GetRef<Expr>(op);
+    } else {
+      return SeqExpr(blocks, body);
+    }
+  }
+
+  BindingBlock VisitBindingBlock(const BindingBlock& block) final {
+    BindingBlock ret;
+    if (const auto* node = block.as<DataflowBlockNode>()) {
+      ret = VisitBindingBlock_(node);
+    } else if (const auto* node = block.as<BindingBlockNode>()) {
+      ret = VisitBindingBlock_(node);
+    } else {
+      LOG(FATAL) << "TypeError: Invalid type: " << block->GetTypeKey();
+    }
+    return ret;
+  }
+
+  BindingBlock VisitBindingBlock_(const BindingBlockNode* block) {
+    builder_->BeginBindingBlock();
+    for (Binding binding : block->bindings) {
+      this->VisitBinding(binding);
+    }
+    return builder_->EndBlock();
+  }
+
+  BindingBlock VisitBindingBlock_(const DataflowBlockNode* block) {
+    builder_->BeginDataflowBlock();
+    for (Binding binding : block->bindings) {
+      this->VisitBinding(binding);
+    }
+    return builder_->EndBlock();
+  }
+
+  void VisitBinding(const Binding& binding) {
+    if (const auto* node = binding.as<VarBindingNode>()) {
+      VisitBinding_(node);
+    } else if (const auto* node = binding.as<MatchCastNode>()) {
+      VisitBinding_(node);
+    } else {
+      LOG(FATAL) << "TypeError: Invalid type: " << binding->GetTypeKey();
+    }
+  }
+
+  void VisitBinding_(const VarBindingNode* binding) {
+    Expr new_value = this->VisitExpr(binding->value);
+    if (!IsStaticStructInfo(binding->var->struct_info_)) {
+      ResetStructInfo(binding->var, GetStructInfo(new_value));
+    }
+
+    if (new_value.same_as(binding->value)) {
+      builder_->EmitNormalized(GetRef<VarBinding>(binding));
+    } else {
+      builder_->EmitNormalized(VarBinding(binding->var, new_value));
+    }
+  }
+
+  void VisitBinding_(const MatchCastNode* binding) {
+    Expr new_value = this->VisitExpr(binding->value);
+
+    if (new_value.same_as(binding->value)) {
+      builder_->EmitNormalized(GetRef<MatchCast>(binding));
+    } else {
+      builder_->EmitNormalized(
+          MatchCast(binding->var, builder_->NormalizeArgument(new_value), binding->struct_info));
+    }
+  }
+
+ private:
+  /*! \brief Internal block builder to emit bindings during rewriting. */
+  BlockBuilder builder_;
+};
+
+Expr CustomNormalize(const Expr& e) { return CustomNormalizeMutator().VisitExpr(e); }
+
 namespace transform {
 
 Pass Normalize() {
@@ -181,6 +321,8 @@ Pass Normalize() {
 TVM_REGISTER_GLOBAL("relax.transform.Normalize").set_body_typed(Normalize);
 
 }  // namespace transform
+
+TVM_REGISTER_GLOBAL("relax.NormalizeExpr").set_body_typed(CustomNormalize);
 
 }  // namespace relax
 }  // namespace tvm

@@ -15,18 +15,20 @@
 # specific language governing permissions and limitations
 # under the License.
 """Analysis used in TensorIR scheduling"""
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import tvm._ffi
 from tvm.runtime import Object
+from tvm.ir import Range
+
 
 from ..buffer import Buffer
 from ..stmt import For
-from ..expr import PrimExpr
+from ..expr import PrimExpr, Var
 from ..function import IndexMap, PrimFunc
 
 from . import _ffi_api
-from .schedule import Schedule, BlockRV
+from .schedule import Schedule, BlockRV, StmtSRef
 
 
 def suggest_index_map(
@@ -159,3 +161,21 @@ def is_output_block(sch: Schedule, block: BlockRV) -> bool:
 
     """
     return _ffi_api.IsOutputBlock(sch, block)  # type: ignore
+
+
+def loop_domain_of_sref_tree_path(low_inclusive: StmtSRef, high_exclusive: StmtSRef) -> Dict[Var, Range]:
+    """Extracts the ranges of loop variables in a path of the sref tree
+
+    Parameters
+    ----------
+    low_inclusive : StmtSRef
+        The lowest node in the path
+    high_exclusive : StmtSRef
+        The highest node in the path, defaults to the scope root if not specified
+
+    Returns
+    -------
+    The loop domain : Dict[Var, Range]
+    """
+
+    return _ffi_api.LoopDomainOfSRefTreePath(low_inclusive, high_exclusive)  # type: ignore
