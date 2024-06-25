@@ -1012,7 +1012,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
 
     Tuple tuple = unchanged ? GetRef<Tuple>(op) : Tuple(new_fields, op->span);
     // Update tuple fields.
-    if (!tuple->struct_info_.defined()) {
+    if (!IsStaticStructInfo(tuple->struct_info_)) {
       Array<StructInfo> tuple_sinfo;
       for (Expr field : tuple->fields) {
         tuple_sinfo.push_back(GetStructInfo(field));
@@ -1056,7 +1056,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
       call = Call(new_op, new_args, op->attrs, op->sinfo_args);
     }
 
-    if (!call->struct_info_.defined()) {
+    if (!IsStaticStructInfo(call->struct_info_)) {
       auto inferred_sinfo = InferStructInfo(call);
       ResetStructInfo(call, inferred_sinfo);
     }
@@ -1096,7 +1096,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
     }
 
     // only do shape/type inference if the SeqExpr does not have shape/type
-    if (!seq_expr->struct_info_.defined()) {
+    if (!IsStaticStructInfo(seq_expr->struct_info_)) {
       ResetStructInfo(seq_expr, EraseToWellDefinedInScope(GetStructInfo(seq_expr->body)));
     }
     return seq_expr;
@@ -1114,7 +1114,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
     } else {
       if_node = If(new_cond, new_true, new_false, op->span);
     }
-    if (!if_node->struct_info_.defined()) {
+    if (!IsStaticStructInfo(if_node->struct_info_)) {
       auto true_info = EraseToWellDefinedInScope(GetStructInfo(new_true));
       auto false_info = EraseToWellDefinedInScope(GetStructInfo(new_false));
       ResetStructInfo(if_node, StructInfoLCA(true_info, false_info));
@@ -1128,7 +1128,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
     TupleGetItem node = new_tuple.same_as(op->tuple) ? GetRef<TupleGetItem>(op)
                                                      : TupleGetItem(new_tuple, op->index);
 
-    if (!node->struct_info_.defined()) {
+    if (!IsStaticStructInfo(node->struct_info_)) {
       auto opt = MatchStructInfo<TupleStructInfo>(node->tuple);
       ICHECK(opt) << "The struct info of Tuple must be TupleStructInfo.";
       ResetStructInfo(node, opt.value()->fields[node->index]);
@@ -1152,7 +1152,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
     if (!new_value.same_as(binding->value)) {
       binding = VarBinding(binding->var, new_value, binding->span);
     }
-    if (!binding->var->struct_info_.defined()) {
+    if (!IsStaticStructInfo(binding->var->struct_info_)) {
       ResetStructInfo(binding->var, GetStructInfo(new_value));
     }
     return binding;
@@ -1163,7 +1163,7 @@ class CustomNormalizer : public BlockBuilderImpl, private ExprFunctor<Expr(const
     if (!new_value.same_as(binding->value)) {
       binding = MatchCast(binding->var, new_value, binding->struct_info, binding->span);
     }
-    if (!binding->var->struct_info_.defined()) {
+    if (!IsStaticStructInfo(binding->var->struct_info_)) {
       ResetStructInfo(binding->var, binding->struct_info);
     }
     return binding;

@@ -92,5 +92,13 @@ RELAX_REGISTER_UNARY_CHECK_OP_AND_IMPL(isfinite);
 RELAX_REGISTER_UNARY_CHECK_OP_AND_IMPL(isinf);
 RELAX_REGISTER_UNARY_CHECK_OP_AND_IMPL(isnan);
 
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_l2_ddr, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_ddr_l2, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_mm_l2, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_l2_mm, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_vm_l2, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_l2_vm, /*require_float_dtype=*/true);
+RELAX_REGISTER_UNARY_ARITH_OP_AND_IMPL(mov_vm_am, /*require_float_dtype=*/true);
+
 }  // namespace relax
 }  // namespace tvm

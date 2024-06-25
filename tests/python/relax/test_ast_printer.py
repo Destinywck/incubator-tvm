@@ -637,6 +637,7 @@ def test_if():
     body = normalize(f).body
     assert isinstance(body, rx.SeqExpr)
     body_str = strip_whitespace(dump_ast(body))
+    import pdb; pdb.set_trace()
     # we expect both branches to be seq exprs
     assert "If" in body_str
     assert "true_branch=SeqExpr(" in body_str

@@ -599,3 +599,31 @@ def isnan(x: Expr) -> Expr:
         The computed result.
     """
     return _ffi_api.isnan(x)  # type: ignore
+
+
+def mov_l2_ddr(x: Expr) -> Expr:
+    return _ffi_api.mov_l2_ddr(x)
+
+
+def mov_ddr_l2(x: Expr) -> Expr:
+    return _ffi_api.mov_ddr_l2(x)
+
+
+def mov_mm_l2(x: Expr) -> Expr:
+    return _ffi_api.mov_mm_l2(x)
+
+
+def mov_l2_mm(x: Expr) -> Expr:
+    return _ffi_api.mov_l2_mm(x)
+
+
+def mov_vm_l2(x: Expr) -> Expr:
+    return _ffi_api.mov_vm_l2(x)
+
+
+def mov_l2_vm(x: Expr) -> Expr:
+    return _ffi_api.mov_l2_vm(x)
+
+
+def mov_vm_am(x: Expr) -> Expr:
+    return _ffi_api.mov_vm_am(x)

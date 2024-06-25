@@ -150,6 +150,13 @@ Expr isnan(Expr x);
 /*! \brief Apply error function to input value. */
 Expr erf(Expr x);
 
+Expr mov_l2_ddr(Expr x);
+
+Expr mov_mm_l2(Expr x);
+
+Expr mov_vm_l2(Expr x);
+
+Expr mov_vm_am(Expr x);
 }  // namespace relax
 }  // namespace tvm
 

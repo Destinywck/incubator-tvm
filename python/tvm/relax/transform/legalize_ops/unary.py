@@ -64,3 +64,11 @@ def _erf(bb: BlockBuilder, call: Call) -> Expr:
         return erf
 
     return bb.call_te(te_erf, call.args[0], primfunc_name_hint="erf")
+
+register_legalize("relax.mov_l2_ddr", _call_topi_without_attr(topi.abs, "tir_mov_l2_ddr"))
+register_legalize("relax.mov_ddr_l2", _call_topi_without_attr(topi.abs, "tir_mov_ddr_l2"))
+register_legalize("relax.mov_mm_l2", _call_topi_without_attr(topi.abs, "tir_mov_mm_l2"))
+register_legalize("relax.mov_l2_mm", _call_topi_without_attr(topi.abs, "tir_mov_l2_mm"))
+register_legalize("relax.mov_vm_l2", _call_topi_without_attr(topi.abs, "tir_mov_vm_l2"))
+register_legalize("relax.mov_l2_vm", _call_topi_without_attr(topi.abs, "tir_mov_l2_vm"))
+register_legalize("relax.mov_vm_am", _call_topi_without_attr(topi.abs, "tir_mov_vm_am"))

@@ -151,6 +151,13 @@ from tvm.relax.op import (
     zeros_like,
     nn,
     ccl,
+    mov_l2_ddr,
+    mov_ddr_l2,
+    mov_mm_l2,
+    mov_l2_mm,
+    mov_vm_l2,
+    mov_l2_vm,
+    mov_vm_am,
 )
 
 from tvm.runtime.ndarray import (
@@ -781,4 +788,11 @@ __all__ = [
     "nn",
     "ccl",
     "erf",
+    "mov_l2_ddr",
+    "mov_ddr_l2",
+    "mov_mm_l2",
+    "mov_l2_mm",
+    "mov_vm_l2",
+    "mov_l2_vm",
+    "mov_vm_am",
 ]

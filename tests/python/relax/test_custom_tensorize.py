@@ -372,6 +372,70 @@ class DoSpecialize:
 
 
 @mutator
+class DataflowInjecter(PyExprMutator):
+    """specialize callee functions from struct_info passed from caller"""
+
+    def __init__(self, mod: IRModule = None) -> None:
+        super().__init__(mod)
+        self.mod = mod
+        self.funcs = {}
+
+    def transform(self, mod: IRModule) -> IRModule:
+        main_var = None
+        main_func = None
+        for _, gv in enumerate(mod.functions):
+            self.funcs[gv] = mod[gv]
+            if gv.name_hint == "main":
+                main_var = gv
+                main_func = mod[gv]
+
+        assert isinstance(main_func, relax.Function)
+
+        new_body = self.visit_expr(main_func.body)
+
+        new_main_func = relax.Function(main_func.params, new_body, relax.ObjectStructInfo(), attrs=main_func.attrs)
+        self.builder_.update_func(main_var, new_main_func)
+        return self.builder_.get()
+
+    def visit_call_(self, op) -> None:
+        """specialize call to cls.function with static shape info"""
+        new_op = super().visit_call_(op)
+        if new_op.op not in self.funcs:
+            return new_op
+        fn = self.funcs[new_op.op]
+        if "scopes" not in fn.attrs:
+            return new_op
+        if "dataflow_fn" in fn.attrs and fn.attrs["dataflow_fn"] == 1:
+            return new_op
+
+        params_scope, rets_scope = fn.attrs["scopes"]
+        pdb.set_trace()
+
+        new_func = copy_with_new_vars(fn)
+        op_args = new_op.args
+        new_params = new_func.params
+
+        assert len(op_args) == len(new_params)
+        for i, _ in enumerate(op_args):
+            relax.expr._reset_struct_info(new_params[i], op_args[i].struct_info)
+        new_func = normalize_expr(new_func)
+        new_gv = self.builder_.add_func(new_func, new_op.op.name_hint)
+
+        new_op = relax.Call(new_gv, new_op.args, new_op.attrs, new_op.sinfo_args, new_op.span)
+        return new_op
+
+
+@tvm.transform.module_pass(opt_level=0, name="InjectDataflow")
+class InjectDataflow:
+    """"""
+
+    def transform_module(self, mod: IRModule, ctx: tvm.transform.PassContext) -> IRModule:
+        mutator = DataflowInjecter(mod)
+        mod = mutator.transform(mod)
+        return mod
+
+
+@mutator
 class LoopMergeMutator(PyExprMutator):
     """merge common outer loops across element wise computes/vector instructions,
     function same as compute_at in tir schedule
@@ -492,7 +556,7 @@ class FusedAct:
     #     x: R.Tensor(["m", "n"], "float32"), y: R.Tensor([1, "n"], "float32"), b: R.Tensor([1, "n"], "float32")
     # ) -> R.Tensor(["m", "n"], "float32"):
     def fused_act(x: R.Tensor, y: R.Tensor, b: R.Tensor) -> R.Tensor:
-        R.func_attr({"Primitive": 1})
+        R.func_attr({"Primitive": 1, "scopes": [["L2", "L2", "L2"], ["L2"]]})
         act = R.multiply(x, y)
         act = R.add(act, b)
         rst = R.nn.relu(act)
@@ -517,12 +581,69 @@ class FusedAct:
         return act
 
 
+@tvm.script.ir_module
+class FusedMatmul:
+    @R.function(private=True)
+    def matmul_l2(
+        fm: R.Tensor((32, 64), "float32"), weight_l2: R.Tensor((64, 64), "float32")
+    ) -> R.Tensor((32, 64), "float32"):
+        with R.dataflow():
+            weights = R.split(weight_l2, 2, 1)
+
+            weight_p_0 = R.TupleGetItem(weights, 0)
+            weight_p_0_mm = R.mov_mm_l2(weight_p_0)
+            matmul = R.matmul(fm, weight_p_0_mm)
+            rst_p_0 = R.nn.gelu(matmul)
+
+            weight_p_1 = R.TupleGetItem(weights, 1)
+            weight_p_1_mm = R.mov_mm_l2(weight_p_1)
+            matmul = R.matmul(fm, weight_p_1_mm)
+            rst_p_1 = R.nn.gelu(matmul)
+
+            rst = R.concat((rst_p_0, rst_p_1), 1)
+            R.output(rst)
+        return rst
+
+    @R.function(private=True)
+    def matmul_ddr(
+        fm: R.Tensor((32, 64), "float32"), weight_ddr: R.Tensor((64, 128), "float32")
+    ) -> R.Tensor((32, 128), "float32"):
+        cls = FusedMatmul
+        R.func_attr({"Primitive": 1})
+        with R.dataflow():
+            weights = R.split(weight_ddr, 2, 1)
+
+            weight_p_0 = R.TupleGetItem(weights, 0)
+            weight_p_0_l2 = R.mov_l2_ddr(weight_p_0)
+            rst_p_0 = cls.matmul_l2(fm, weight_p_0_l2)
+
+            weight_p_1 = R.TupleGetItem(weights, 1)
+            weight_p_1_l2 = R.mov_l2_ddr(weight_p_1)
+            rst_p_1 = cls.matmul_l2(fm, weight_p_1_l2)
+
+            rst = R.concat((rst_p_0, rst_p_1), 1)
+            R.output(rst)
+        return rst
+
+    @R.function(pure=False)
+    def main(
+        fm: R.Tensor((32, 64), "float32"),
+        weight: R.Tensor((64, 128), "float32"),
+    ):
+        cls = FusedMatmul
+        with R.dataflow():
+            act: R.Tensor((32, 128), dtype="float32") = cls.matmul_ddr(fm, weight)
+            R.output(act)
+        return act
+
+
 def test_codegen():
     mod = FusedAct
     with tvm.transform.PassContext(config={}, instruments=[DumpIR()]):
         mod = tvm.relay.transform.InferType()(mod)
         mod = SpatialSplit()(mod)
         mod = DoSpecialize()(mod)
+        mod = InjectDataflow()(mod)
         mod = tvm.relay.transform.InferType()(mod)
         mod = tvm.relax.transform.DeadCodeElimination(entry_functions=["main"])(mod)
 
